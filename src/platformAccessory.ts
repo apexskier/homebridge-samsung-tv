@@ -354,7 +354,8 @@ export class CowayPlatformAccessory {
         if (pm25 >= 0) {
           return this.platform.Characteristic.AirQuality.EXCELLENT;
         }
-        throw new Error(`unknown dustpm25 ${dustpm25}`);
+        return this.platform.Characteristic.AirQuality.EXCELLENT;
+        // throw new Error(`unknown dustpm25 ${dustpm25}`);
       });
     indoorAirQualityService
       .getCharacteristic(this.platform.Characteristic.PM2_5Density)
@@ -542,6 +543,7 @@ export class CowayPlatformAccessory {
         this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
       );
     }
+    this.platform.log.debug("guardedOnlineData", this.data);
     return this.data;
   }
 }
