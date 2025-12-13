@@ -202,12 +202,7 @@ export class CowayPlatformAccessory {
       .setValue(this.accessory.context.device.dvcNick);
     airPurifierService
       .getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(() => {
-        this.platform.log.debug(`getCharacteristic.Active`, this.guardedOnlineData().prodStatus.power);
-        return this.guardedOnlineData().prodStatus.power === Power.On
-            ? this.platform.Characteristic.Active.ACTIVE
-            : this.platform.Characteristic.Active.INACTIVE
-      })
+      .onGet(this.getActive)
       .onSet(
         logSet("setting power", async (value) =>
           this.controlDevice([
@@ -223,34 +218,10 @@ export class CowayPlatformAccessory {
       );
     airPurifierService
       .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
-      .onGet(() => {
-        this.platform.log.debug(`getCharacteristic.CurrentAirPurifierState`, this.guardedOnlineData().prodStatus);
-        const prodStatus = this.guardedOnlineData().prodStatus;
-        if (prodStatus.prodMode === Mode.Off) {
-          return this.platform.Characteristic.CurrentAirPurifierState.INACTIVE;
-        }
-        if (prodStatus.airVolume === Fan.Off) {
-          return this.platform.Characteristic.CurrentAirPurifierState.IDLE;
-        }
-        return this.platform.Characteristic.CurrentAirPurifierState
-          .PURIFYING_AIR;
-      });
+      .onGet(this.getCurrentAirPurifierState);
     airPurifierService
       .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
-      .onGet(() => {
-        this.platform.log.debug(`getCharacteristic.TargetAirPurifierState`, this.guardedOnlineData().prodStatus.prodMode);
-        switch (this.guardedOnlineData().prodStatus.prodMode) {
-          case Mode.Smart:
-          case Mode.SmartEco:
-          case Mode.Rapid: // max speed until AQI is good for more than 5 minutes, then smart
-          case Mode.Sleep:
-            return this.platform.Characteristic.TargetAirPurifierState.AUTO;
-          case Mode.Manual:
-            return this.platform.Characteristic.TargetAirPurifierState.MANUAL;
-          case Mode.Off:
-            return this.platform.Characteristic.TargetAirPurifierState.AUTO;
-        }
-      })
+      .onGet(this.getTargetAirPurifierState)
       .onSet(
         logSet("setting target state", async (value) =>
           this.controlDevice([
@@ -267,23 +238,7 @@ export class CowayPlatformAccessory {
       );
     airPurifierService
       .getCharacteristic(this.platform.Characteristic.RotationSpeed)
-      .onGet(() => {
-        this.platform.log.debug(`getCharacteristic.RotationSpeed`, this.guardedOnlineData().prodStatus.airVolume);
-        const airVolume = this.guardedOnlineData().prodStatus.airVolume;
-        switch (airVolume) {
-          case Fan.Low:
-            return 33;
-          case Fan.Medium:
-            return 66;
-          case Fan.High:
-            return 100;
-          case Fan.Unknown:
-          case Fan.Off:
-            return 0;
-          default:
-            throw new Error(`unknown fan ${airVolume}`);
-        }
-      })
+      .onGet(this.getRotationSpeed)
       .onSet(
         logSet("setting fan state", async (value) => {
           if (typeof value !== "number") {
@@ -322,75 +277,13 @@ export class CowayPlatformAccessory {
       .setValue("Indoor Air Quality");
     indoorAirQualityService
       .getCharacteristic(this.platform.Characteristic.AirQuality)
-      .onGet(() => {
-        this.platform.log.debug(`getCharacteristic.AirQuality`, this.guardedOnlineData().IAQ);
-        const airQuality = this.guardedOnlineData().IAQ.inairquality;
-        switch (airQuality) {
-          case AirQuality.Excellent:
-            return this.platform.Characteristic.AirQuality.EXCELLENT;
-          case AirQuality.Good:
-            return this.platform.Characteristic.AirQuality.GOOD;
-          case AirQuality.Fair:
-            return this.platform.Characteristic.AirQuality.FAIR;
-          case AirQuality.Inferior:
-            return this.platform.Characteristic.AirQuality.INFERIOR;
-          case "":
-            this.platform.log.debug(`no air quality, falling back to pm`);
-            break;
-          default:
-            this.platform.log.warn(
-              `unknown air quality "${airQuality}", falling back to pm`,
-            );
-        }
-
-        // fall back to pm2.5
-        const { dustpm25, dustpm10, dustpm1 } = this.guardedOnlineData().IAQ;
-        let pmValue = -1;
-        if(dustpm25 !== '') {
-          pmValue = parseInt(dustpm25, 10);
-        } else if (dustpm10 !== '') {
-          pmValue = parseInt(dustpm10, 10);
-        } else if (dustpm1 !== '') {
-          pmValue = parseInt(dustpm1, 10);
-        }
-
-        if (pmValue >= 151) {
-          return this.platform.Characteristic.AirQuality.POOR;
-        }
-        if (pmValue >= 56) {
-          return this.platform.Characteristic.AirQuality.INFERIOR;
-        }
-        if (pmValue >= 36) {
-          return this.platform.Characteristic.AirQuality.FAIR;
-        }
-        if (pmValue >= 12) {
-          return this.platform.Characteristic.AirQuality.GOOD;
-        }
-        if (pmValue >= 0) {
-          return this.platform.Characteristic.AirQuality.EXCELLENT;
-        }
-        throw new Error(`unknown dustpm: ${dustpm25} / ${dustpm10} / ${dustpm1}`);
-      });
+      .onGet(this.getAirQuality);
     indoorAirQualityService
       .getCharacteristic(this.platform.Characteristic.PM2_5Density)
-      .onGet(() => {
-        if (this.guardedOnlineData().IAQ.dustpm25 === "") {
-          throw new this.platform.api.hap.HapStatusError(
-            this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
-          );
-        }
-        return parseInt(this.guardedOnlineData().IAQ.dustpm25, 10);
-      });
+      .onGet(this.getPm25Density);
     indoorAirQualityService
       .getCharacteristic(this.platform.Characteristic.PM10Density)
-      .onGet(() => {
-        if (this.guardedOnlineData().IAQ.dustpm10 === "") {
-          throw new this.platform.api.hap.HapStatusError(
-            this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
-          );
-        }
-        return parseInt(this.guardedOnlineData().IAQ.dustpm10, 10);
-      });
+      .onGet(this.getPm10Density);
 
     const filters = {
       [0]: {
@@ -438,7 +331,157 @@ export class CowayPlatformAccessory {
     this.poll();
   }
 
-  // ???
+  private getPm10Density = () => {
+    if (this.guardedOnlineData().IAQ.dustpm10 === "") {
+      throw new this.platform.api.hap.HapStatusError(
+          this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+      );
+    }
+    return parseInt(this.guardedOnlineData().IAQ.dustpm10, 10);
+  }
+  private getPm25Density = () => {
+    if (this.guardedOnlineData().IAQ.dustpm25 === "") {
+      throw new this.platform.api.hap.HapStatusError(
+          this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+      );
+    }
+    return parseInt(this.guardedOnlineData().IAQ.dustpm25, 10);
+  }
+  private getRotationSpeed = () => {
+    this.platform.log.debug(`getCharacteristic.RotationSpeed`, this.guardedOnlineData().prodStatus.airVolume);
+    const airVolume = this.guardedOnlineData().prodStatus.airVolume;
+    switch (airVolume) {
+      case Fan.Low:
+        return 33;
+      case Fan.Medium:
+        return 66;
+      case Fan.High:
+        return 100;
+      case Fan.Unknown:
+      case Fan.Off:
+        return 0;
+      default:
+        throw new Error(`unknown fan ${airVolume}`);
+    }
+  }
+  private getTargetAirPurifierState = () => {
+    this.platform.log.debug(`getCharacteristic.TargetAirPurifierState`, this.guardedOnlineData().prodStatus.prodMode);
+    switch (this.guardedOnlineData().prodStatus.prodMode) {
+      case Mode.Smart:
+      case Mode.SmartEco:
+      case Mode.Rapid: // max speed until AQI is good for more than 5 minutes, then smart
+      case Mode.Sleep:
+        return this.platform.Characteristic.TargetAirPurifierState.AUTO;
+      case Mode.Manual:
+        return this.platform.Characteristic.TargetAirPurifierState.MANUAL;
+      case Mode.Off:
+        return this.platform.Characteristic.TargetAirPurifierState.AUTO;
+    }
+  }
+  private getCurrentAirPurifierState = () => {
+    this.platform.log.debug(`getCharacteristic.CurrentAirPurifierState`, this.guardedOnlineData().prodStatus);
+    const prodStatus = this.guardedOnlineData().prodStatus;
+    if (prodStatus.prodMode === Mode.Off) {
+      return this.platform.Characteristic.CurrentAirPurifierState.INACTIVE;
+    }
+    if (prodStatus.airVolume === Fan.Off) {
+      return this.platform.Characteristic.CurrentAirPurifierState.IDLE;
+    }
+    return this.platform.Characteristic.CurrentAirPurifierState
+        .PURIFYING_AIR;
+  }
+  private getActive = () => {
+      this.platform.log.debug(`getCharacteristic.Active`, this.guardedOnlineData().prodStatus.power);
+      return this.guardedOnlineData().prodStatus.power === Power.On
+          ? this.platform.Characteristic.Active.ACTIVE
+          : this.platform.Characteristic.Active.INACTIVE
+  }
+  private getAirQuality = () => {
+      this.platform.log.debug(`getCharacteristic.AirQuality`, this.guardedOnlineData().IAQ);
+      const airQuality = this.guardedOnlineData().IAQ.inairquality;
+      switch (airQuality) {
+        case AirQuality.Excellent:
+          return this.platform.Characteristic.AirQuality.EXCELLENT;
+        case AirQuality.Good:
+          return this.platform.Characteristic.AirQuality.GOOD;
+        case AirQuality.Fair:
+          return this.platform.Characteristic.AirQuality.FAIR;
+        case AirQuality.Inferior:
+          return this.platform.Characteristic.AirQuality.INFERIOR;
+        case "":
+          this.platform.log.debug(`no air quality, falling back to pm`);
+          break;
+        default:
+          this.platform.log.warn(
+              `unknown air quality "${airQuality}", falling back to pm`,
+          );
+      }
+
+      // fall back to pm2.5
+      const {dustpm25, dustpm10, dustpm1} = this.guardedOnlineData().IAQ;
+      let pmValue = -1;
+      if (dustpm25 !== '') {
+        pmValue = parseInt(dustpm25, 10);
+      } else if (dustpm10 !== '') {
+        pmValue = parseInt(dustpm10, 10);
+      } else if (dustpm1 !== '') {
+        pmValue = parseInt(dustpm1, 10);
+      }
+
+      if (pmValue >= 151) {
+        return this.platform.Characteristic.AirQuality.POOR;
+      }
+      if (pmValue >= 56) {
+        return this.platform.Characteristic.AirQuality.INFERIOR;
+      }
+      if (pmValue >= 36) {
+        return this.platform.Characteristic.AirQuality.FAIR;
+      }
+      if (pmValue >= 12) {
+        return this.platform.Characteristic.AirQuality.GOOD;
+      }
+      if (pmValue >= 0) {
+        return this.platform.Characteristic.AirQuality.EXCELLENT;
+      }
+      throw new Error(`unknown dustpm: ${dustpm25} / ${dustpm10} / ${dustpm1}`);
+  }
+
+  private pushHomeKitUpdates = () => {
+    const airPurifierService =
+        this.accessory.getService(this.platform.Service.AirPurifier);
+    if(airPurifierService) {
+      airPurifierService
+          .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
+          .updateValue(this.getCurrentAirPurifierState());
+      airPurifierService
+          .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
+          .updateValue(this.getTargetAirPurifierState());
+      airPurifierService
+          .getCharacteristic(this.platform.Characteristic.Active)
+          .updateValue(this.getActive());
+      airPurifierService
+          .getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .updateValue(this.getRotationSpeed());
+    }
+
+    const indoorAirQualityService =
+        this.accessory.getServiceById(
+            this.platform.Service.AirQualitySensor,
+            "indoor",
+        );
+    if(indoorAirQualityService) {
+      indoorAirQualityService
+          .getCharacteristic(this.platform.Characteristic.AirQuality)
+          .updateValue(this.getAirQuality());
+      indoorAirQualityService
+          .getCharacteristic(this.platform.Characteristic.PM2_5Density)
+          .updateValue(this.getPm25Density());
+      indoorAirQualityService
+          .getCharacteristic(this.platform.Characteristic.PM10Density)
+          .updateValue(this.getPm10Density());
+    }
+  }
+// ???
   private async comDevice() {
     const url = new URL(
       `https://iocareapi.iot.coway.com/api/v1/com/devices/${this.accessory.context.device.barcode}/control`,
@@ -549,6 +592,7 @@ export class CowayPlatformAccessory {
     ).json()) as Response<DeviceData>;
     this.platform.log.debug("updated status");
     this.data = data;
+    this.pushHomeKitUpdates();
   }
 
   private guardedOnlineData(): DeviceData {
