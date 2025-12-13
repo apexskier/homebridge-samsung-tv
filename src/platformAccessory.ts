@@ -473,12 +473,16 @@ export class CowayPlatformAccessory {
       indoorAirQualityService
           .getCharacteristic(this.platform.Characteristic.AirQuality)
           .updateValue(this.getAirQuality());
-      indoorAirQualityService
-          .getCharacteristic(this.platform.Characteristic.PM2_5Density)
-          .updateValue(this.getPm25Density());
-      indoorAirQualityService
-          .getCharacteristic(this.platform.Characteristic.PM10Density)
-          .updateValue(this.getPm10Density());
+      if (this.guardedOnlineData().IAQ.dustpm25 !== "") {
+        indoorAirQualityService
+            .getCharacteristic(this.platform.Characteristic.PM2_5Density)
+            .updateValue(this.getPm25Density());
+      }
+      if (this.guardedOnlineData().IAQ.dustpm10 === "") {
+        indoorAirQualityService
+            .getCharacteristic(this.platform.Characteristic.PM10Density)
+            .updateValue(this.getPm10Density());
+      }
     }
   }
 // ???
@@ -601,7 +605,6 @@ export class CowayPlatformAccessory {
         this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
       );
     }
-    this.platform.log.debug("guardedOnlineData", this.data);
     return this.data;
   }
 }
