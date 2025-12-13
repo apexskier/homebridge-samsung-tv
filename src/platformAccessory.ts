@@ -417,7 +417,7 @@ export class CowayPlatformAccessory {
           );
       }
 
-      // fall back to pm2.5
+      // fall back to pm2.5, pm10, or pm1
       const {dustpm25, dustpm10, dustpm1} = this.guardedOnlineData().IAQ;
       let pmValue = -1;
       if (dustpm25 !== '') {
