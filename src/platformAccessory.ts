@@ -259,7 +259,7 @@ export class CowayPlatformAccessory {
             return this.controlDevice([
               {
                 funcId: FunctionId.Mode,
-                cmdVal:Mode.Smart,
+                cmdVal: Mode.Smart,
               },
             ]);
           }
@@ -272,12 +272,12 @@ export class CowayPlatformAccessory {
           } else {
             fan = Fan.Low;
           }
-            return this.controlDevice([
-              {
-                funcId: FunctionId.Fan,
-                cmdVal: fan,
-              },
-            ]);
+          return this.controlDevice([
+            {
+              funcId: FunctionId.Fan,
+              cmdVal: fan,
+            },
+          ]);
         }),
       );
 
@@ -353,21 +353,24 @@ export class CowayPlatformAccessory {
   private getPm10Density = () => {
     if (this.guardedOnlineData().IAQ.dustpm10 === "") {
       throw new this.platform.api.hap.HapStatusError(
-          this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+        this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
       );
     }
     return parseInt(this.guardedOnlineData().IAQ.dustpm10, 10);
-  }
+  };
   private getPm25Density = () => {
     if (this.guardedOnlineData().IAQ.dustpm25 === "") {
       throw new this.platform.api.hap.HapStatusError(
-          this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+        this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
       );
     }
     return parseInt(this.guardedOnlineData().IAQ.dustpm25, 10);
-  }
+  };
   private getRotationSpeed = () => {
-    this.platform.log.debug(`getCharacteristic.RotationSpeed`, this.guardedOnlineData().prodStatus.airVolume);
+    this.platform.log.debug(
+      `getCharacteristic.RotationSpeed`,
+      this.guardedOnlineData().prodStatus.airVolume,
+    );
     const airVolume = this.guardedOnlineData().prodStatus.airVolume;
     switch (airVolume) {
       case Fan.Low:
@@ -382,9 +385,12 @@ export class CowayPlatformAccessory {
       default:
         throw new Error(`unknown fan ${airVolume}`);
     }
-  }
+  };
   private getTargetAirPurifierState = () => {
-    this.platform.log.debug(`getCharacteristic.TargetAirPurifierState`, this.guardedOnlineData().prodStatus.prodMode);
+    this.platform.log.debug(
+      `getCharacteristic.TargetAirPurifierState`,
+      this.guardedOnlineData().prodStatus.prodMode,
+    );
     switch (this.guardedOnlineData().prodStatus.prodMode) {
       case Mode.Smart:
       case Mode.SmartEco:
@@ -396,9 +402,12 @@ export class CowayPlatformAccessory {
       case Mode.Off:
         return this.platform.Characteristic.TargetAirPurifierState.AUTO;
     }
-  }
+  };
   private getCurrentAirPurifierState = () => {
-    this.platform.log.debug(`getCharacteristic.CurrentAirPurifierState`, this.guardedOnlineData().prodStatus);
+    this.platform.log.debug(
+      `getCharacteristic.CurrentAirPurifierState`,
+      this.guardedOnlineData().prodStatus,
+    );
     const prodStatus = this.guardedOnlineData().prodStatus;
     if (prodStatus.prodMode === Mode.Off) {
       return this.platform.Characteristic.CurrentAirPurifierState.INACTIVE;
@@ -406,105 +415,110 @@ export class CowayPlatformAccessory {
     if (prodStatus.airVolume === Fan.Off) {
       return this.platform.Characteristic.CurrentAirPurifierState.IDLE;
     }
-    return this.platform.Characteristic.CurrentAirPurifierState
-        .PURIFYING_AIR;
-  }
+    return this.platform.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+  };
   private getActive = () => {
-      this.platform.log.debug(`getCharacteristic.Active`, this.guardedOnlineData().prodStatus.power);
-      return this.guardedOnlineData().prodStatus.power === Power.On
-          ? this.platform.Characteristic.Active.ACTIVE
-          : this.platform.Characteristic.Active.INACTIVE
-  }
+    this.platform.log.debug(
+      `getCharacteristic.Active`,
+      this.guardedOnlineData().prodStatus.power,
+    );
+    return this.guardedOnlineData().prodStatus.power === Power.On
+      ? this.platform.Characteristic.Active.ACTIVE
+      : this.platform.Characteristic.Active.INACTIVE;
+  };
   private getAirQuality = () => {
-      this.platform.log.debug(`getCharacteristic.AirQuality`, this.guardedOnlineData().IAQ);
-      const airQuality = this.guardedOnlineData().IAQ.inairquality;
-      switch (airQuality) {
-        case AirQuality.Excellent:
-          return this.platform.Characteristic.AirQuality.EXCELLENT;
-        case AirQuality.Good:
-          return this.platform.Characteristic.AirQuality.GOOD;
-        case AirQuality.Fair:
-          return this.platform.Characteristic.AirQuality.FAIR;
-        case AirQuality.Inferior:
-          return this.platform.Characteristic.AirQuality.INFERIOR;
-        case "":
-          this.platform.log.debug(`no air quality, falling back to pm`);
-          break;
-        default:
-          this.platform.log.warn(
-              `unknown air quality "${airQuality}", falling back to pm`,
-          );
-      }
-
-      // fall back to pm2.5, pm10, or pm1
-      const {dustpm25, dustpm10, dustpm1} = this.guardedOnlineData().IAQ;
-      let pmValue = -1;
-      if (dustpm25 !== '') {
-        pmValue = parseInt(dustpm25, 10);
-      } else if (dustpm10 !== '') {
-        pmValue = parseInt(dustpm10, 10);
-      } else if (dustpm1 !== '') {
-        pmValue = parseInt(dustpm1, 10);
-      }
-
-      if (pmValue >= 151) {
-        return this.platform.Characteristic.AirQuality.POOR;
-      }
-      if (pmValue >= 56) {
-        return this.platform.Characteristic.AirQuality.INFERIOR;
-      }
-      if (pmValue >= 36) {
-        return this.platform.Characteristic.AirQuality.FAIR;
-      }
-      if (pmValue >= 12) {
-        return this.platform.Characteristic.AirQuality.GOOD;
-      }
-      if (pmValue >= 0) {
+    this.platform.log.debug(
+      `getCharacteristic.AirQuality`,
+      this.guardedOnlineData().IAQ,
+    );
+    const airQuality = this.guardedOnlineData().IAQ.inairquality;
+    switch (airQuality) {
+      case AirQuality.Excellent:
         return this.platform.Characteristic.AirQuality.EXCELLENT;
-      }
-      throw new Error(`unknown dustpm: ${dustpm25} / ${dustpm10} / ${dustpm1}`);
-  }
-
-  private pushHomeKitUpdates = () => {
-    const airPurifierService =
-        this.accessory.getService(this.platform.Service.AirPurifier);
-    if(airPurifierService) {
-      airPurifierService
-          .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
-          .updateValue(this.getCurrentAirPurifierState());
-      airPurifierService
-          .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
-          .updateValue(this.getTargetAirPurifierState());
-      airPurifierService
-          .getCharacteristic(this.platform.Characteristic.Active)
-          .updateValue(this.getActive());
-      airPurifierService
-          .getCharacteristic(this.platform.Characteristic.RotationSpeed)
-          .updateValue(this.getRotationSpeed());
+      case AirQuality.Good:
+        return this.platform.Characteristic.AirQuality.GOOD;
+      case AirQuality.Fair:
+        return this.platform.Characteristic.AirQuality.FAIR;
+      case AirQuality.Inferior:
+        return this.platform.Characteristic.AirQuality.INFERIOR;
+      case "":
+        this.platform.log.debug(`no air quality, falling back to pm`);
+        break;
+      default:
+        this.platform.log.warn(
+          `unknown air quality "${airQuality}", falling back to pm`,
+        );
     }
 
-    const indoorAirQualityService =
-        this.accessory.getServiceById(
-            this.platform.Service.AirQualitySensor,
-            "indoor",
-        );
-    if(indoorAirQualityService) {
+    // fall back to pm2.5, pm10, or pm1
+    const { dustpm25, dustpm10, dustpm1 } = this.guardedOnlineData().IAQ;
+    let pmValue = -1;
+    if (dustpm25 !== "") {
+      pmValue = parseInt(dustpm25, 10);
+    } else if (dustpm10 !== "") {
+      pmValue = parseInt(dustpm10, 10);
+    } else if (dustpm1 !== "") {
+      pmValue = parseInt(dustpm1, 10);
+    }
+
+    if (pmValue >= 151) {
+      return this.platform.Characteristic.AirQuality.POOR;
+    }
+    if (pmValue >= 56) {
+      return this.platform.Characteristic.AirQuality.INFERIOR;
+    }
+    if (pmValue >= 36) {
+      return this.platform.Characteristic.AirQuality.FAIR;
+    }
+    if (pmValue >= 12) {
+      return this.platform.Characteristic.AirQuality.GOOD;
+    }
+    if (pmValue >= 0) {
+      return this.platform.Characteristic.AirQuality.EXCELLENT;
+    }
+    throw new Error(`unknown dustpm: ${dustpm25} / ${dustpm10} / ${dustpm1}`);
+  };
+
+  private pushHomeKitUpdates = () => {
+    const airPurifierService = this.accessory.getService(
+      this.platform.Service.AirPurifier,
+    );
+    if (airPurifierService) {
+      airPurifierService
+        .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
+        .updateValue(this.getCurrentAirPurifierState());
+      airPurifierService
+        .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
+        .updateValue(this.getTargetAirPurifierState());
+      airPurifierService
+        .getCharacteristic(this.platform.Characteristic.Active)
+        .updateValue(this.getActive());
+      airPurifierService
+        .getCharacteristic(this.platform.Characteristic.RotationSpeed)
+        .updateValue(this.getRotationSpeed());
+    }
+
+    const indoorAirQualityService = this.accessory.getServiceById(
+      this.platform.Service.AirQualitySensor,
+      "indoor",
+    );
+    if (indoorAirQualityService) {
       indoorAirQualityService
-          .getCharacteristic(this.platform.Characteristic.AirQuality)
-          .updateValue(this.getAirQuality());
+        .getCharacteristic(this.platform.Characteristic.AirQuality)
+        .updateValue(this.getAirQuality());
       if (this.guardedOnlineData().IAQ.dustpm25 !== "") {
         indoorAirQualityService
-            .getCharacteristic(this.platform.Characteristic.PM2_5Density)
-            .updateValue(this.getPm25Density());
+          .getCharacteristic(this.platform.Characteristic.PM2_5Density)
+          .updateValue(this.getPm25Density());
       }
       if (this.guardedOnlineData().IAQ.dustpm10 === "") {
         indoorAirQualityService
-            .getCharacteristic(this.platform.Characteristic.PM10Density)
-            .updateValue(this.getPm10Density());
+          .getCharacteristic(this.platform.Characteristic.PM10Density)
+          .updateValue(this.getPm10Density());
       }
     }
-  }
-// ???
+  };
+  // ???
   private async comDevice() {
     const url = new URL(
       `https://iocareapi.iot.coway.com/api/v1/com/devices/${this.accessory.context.device.barcode}/control`,
@@ -552,7 +566,10 @@ export class CowayPlatformAccessory {
   }
 
   private async controlDevice(commands: Array<FunctionI<FunctionId>>) {
-    this.pendingCommands = this.coalesceCommands(this.pendingCommands, commands);
+    this.pendingCommands = this.coalesceCommands(
+      this.pendingCommands,
+      commands,
+    );
 
     if (this.coalesceTimer) {
       clearTimeout(this.coalesceTimer);
@@ -620,9 +637,10 @@ export class CowayPlatformAccessory {
     incoming: Array<FunctionI<FunctionId>>, // eslint-disable-line max-len
   ): Array<FunctionI<FunctionId>> {
     if (this.containsSmartMode(incoming)) {
-      return incoming.filter((command) =>
-        command.funcId === FunctionId.Mode &&
-        this.isSmartMode(command.cmdVal as Mode),
+      return incoming.filter(
+        (command) =>
+          command.funcId === FunctionId.Mode &&
+          this.isSmartMode(command.cmdVal as Mode),
       );
     }
 
@@ -638,10 +656,16 @@ export class CowayPlatformAccessory {
 
     const mergedCommands = new Map<FunctionId, FunctionValue[FunctionId]>();
     for (const command of current) {
-      mergedCommands.set(command.funcId, command.cmdVal as FunctionValue[FunctionId]);
+      mergedCommands.set(
+        command.funcId,
+        command.cmdVal as FunctionValue[FunctionId],
+      );
     }
     for (const command of incoming) {
-      mergedCommands.set(command.funcId, command.cmdVal as FunctionValue[FunctionId]);
+      mergedCommands.set(
+        command.funcId,
+        command.cmdVal as FunctionValue[FunctionId],
+      );
     }
 
     return Array.from(mergedCommands.entries()).map(([funcId, cmdVal]) => ({
@@ -656,7 +680,9 @@ export class CowayPlatformAccessory {
 
   private containsSmartMode(commands: Array<FunctionI<FunctionId>>) {
     return commands.some(
-      (command) => command.funcId === FunctionId.Mode && this.isSmartMode(command.cmdVal as Mode),
+      (command) =>
+        command.funcId === FunctionId.Mode &&
+        this.isSmartMode(command.cmdVal as Mode),
     );
   }
 
@@ -668,7 +694,9 @@ export class CowayPlatformAccessory {
   }
 
   private containsOffCommand(commands: Array<FunctionI<FunctionId>>) {
-    return commands.some((command) => this.isOffCommand(command.funcId, command.cmdVal as Mode | Power));
+    return commands.some((command) =>
+      this.isOffCommand(command.funcId, command.cmdVal as Mode | Power),
+    );
   }
 
   private poll() {
