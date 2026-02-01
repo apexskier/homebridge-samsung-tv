@@ -171,7 +171,7 @@ interface DeviceData {
 export class CowayPlatformAccessory {
   data: null | DeviceData = null;
   private pendingCommands: Array<FunctionI<FunctionId>> = [];
-  private coalesceTimer: NodeJS.Timeout | null = null;
+  private coalesceTimer?: NodeJS.Timeout;
   private pendingSendPromise: Promise<void> | null = null;
   private pendingSendResolve: (() => void) | null = null;
   private pendingSendReject: ((reason?: unknown) => void) | null = null;
@@ -572,10 +572,7 @@ export class CowayPlatformAccessory {
       commands,
     );
 
-    if (this.coalesceTimer) {
-      clearTimeout(this.coalesceTimer);
-      this.coalesceTimer = null;
-    }
+    clearTimeout(this.coalesceTimer);
 
     if (!this.pendingSendPromise) {
       this.pendingSendPromise = new Promise((resolve, reject) => {
@@ -587,7 +584,6 @@ export class CowayPlatformAccessory {
     this.coalesceTimer = setTimeout(() => {
       const coalescedCommands = this.pendingCommands;
       this.pendingCommands = [];
-      this.coalesceTimer = null;
 
       this.sendCommands(coalescedCommands)
         .then(() => this.pendingSendResolve?.())
@@ -634,8 +630,8 @@ export class CowayPlatformAccessory {
   }
 
   private coalesceCommands(
-    current: Array<FunctionI<FunctionId>>, // eslint-disable-line max-len
-    incoming: Array<FunctionI<FunctionId>>, // eslint-disable-line max-len
+    current: Array<FunctionI<FunctionId>>,
+    incoming: Array<FunctionI<FunctionId>>,
   ): Array<FunctionI<FunctionId>> {
     if (this.containsSmartMode(incoming)) {
       this.platform.log.debug(
