@@ -72,6 +72,15 @@ enum Mode {
   SmartEco = "6",
 }
 
+function isAutoMode(mode: Mode) {
+  return (
+    mode === Mode.Smart ||
+    mode === Mode.Sleep ||
+    mode === Mode.Rapid ||
+    mode === Mode.SmartEco
+  );
+}
+
 enum AirQuality {
   Good = "1",
   Moderate = "2",
@@ -382,8 +391,8 @@ export class CowayPlatformAccessory {
       case AirVolume.Rapid:
         return 100;
       case AirVolume.Off:
+      case AirVolume.Unknown: // ? I think
         return 0;
-      case AirVolume.Unknown:
       default:
         throw new Error(`unknown fan ${airVolume}`);
     }
@@ -634,20 +643,9 @@ export class CowayPlatformAccessory {
     current: Array<FunctionI<FunctionId>>,
     incoming: Array<FunctionI<FunctionId>>,
   ): Array<FunctionI<FunctionId>> {
-    if (incoming.some(isSmartModeCommand)) {
-      this.platform.log.debug(
-        "'Smart Mode' command received. Ignoring other input.",
-      );
-      return incoming.filter(isSmartModeCommand);
-    }
-
     if (incoming.some(isOffCommand)) {
       this.platform.log.debug("'Off' command received. Ignoring other input.");
       return incoming.filter(isOffCommand);
-    }
-
-    if (current.some(isSmartModeCommand)) {
-      return current;
     }
 
     const mergedCommands = new Map<FunctionId, FunctionValue[FunctionId]>();
@@ -656,6 +654,17 @@ export class CowayPlatformAccessory {
     }
     for (const command of incoming) {
       mergedCommands.set(command.funcId, command.cmdVal);
+    }
+
+    const modeCommand = mergedCommands.get(FunctionId.Mode) as Mode | undefined;
+    if (modeCommand !== undefined) {
+      if (isAutoMode(modeCommand)) {
+        // remove any fan speed settings, see #18
+        mergedCommands.delete(FunctionId.AirVolume);
+        this.platform.log.debug(
+          "Auto mode set, removing any fan speed commands.",
+        );
+      }
     }
 
     return Array.from(mergedCommands.entries()).map(([funcId, cmdVal]) => ({
@@ -711,25 +720,6 @@ export class CowayPlatformAccessory {
     }
     return this.data;
   }
-}
-
-function isCommandOfMode<T extends FunctionId>(
-  command: FunctionI<FunctionId>,
-  mode: T,
-): command is FunctionI<T> {
-  return command.funcId === mode;
-}
-
-function isSmartMode(mode: Mode) {
-  return mode === Mode.Smart || mode === Mode.SmartEco;
-}
-
-function isSmartModeCommand(
-  command: FunctionI<FunctionId>,
-): command is FunctionI<FunctionId> {
-  return (
-    isCommandOfMode(command, FunctionId.Mode) && isSmartMode(command.cmdVal)
-  );
 }
 
 function isOffCommand(command: FunctionI<FunctionId>) {
