@@ -273,10 +273,16 @@ export class MyPlatformAccessory {
             value === this.platform.Characteristic.Active.INACTIVE
               ? "standby"
               : "on";
-          const {
-            device: { PowerState },
-          } = await this.refresh();
-          if (PowerState === targetState) {
+          let currentState: "unknown" | "on" | "standby" = "unknown";
+          try {
+            const {
+              device: { PowerState },
+            } = await this.refresh();
+            currentState = PowerState;
+          } catch (error) {
+            this.platform.log.debug("Error refreshing TV state:", error);
+          }
+          if (currentState === targetState) {
             this.platform.log.debug(
               `TV already in target power state: ${targetState}`,
             );
