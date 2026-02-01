@@ -1,16 +1,11 @@
 {
-  "pluginAlias": "ApexskierHomebridgeCoway",
+  "pluginAlias": "ApexskierHomebridgeSamsungTV",
   "pluginType": "platform",
   "schema": {
     "type": "object",
     "properties": {
-      "username": {
-        "title": "Username",
-        "type": "string",
-        "required": true
-      },
-      "password": {
-        "title": "Password",
+      "ip": {
+        "title": "IP Address",
         "type": "string",
         "required": true
       }

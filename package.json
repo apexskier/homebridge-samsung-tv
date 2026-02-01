@@ -1,15 +1,15 @@
 {
-  "displayName": "Coway Airmega",
-  "name": "@apexskier/homebridge-airmega",
+  "displayName": "Samsung TV",
+  "name": "@apexskier/homebridge-samsung-tv",
   "version": "1.1.10",
-  "description": "Control the Coway Airmega 'S' Series air purifiers in homebridge.",
+  "description": "Control a Samsung Smart TV via Homebridge",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/apexskier/homebridge-airmega.git"
+    "url": "git+https://github.com/apexskier/homebridge-samsung-tv.git"
   },
   "bugs": {
-    "url": "https://github.com/apexskier/homebridge-airmega/issues"
+    "url": "https://github.com/apexskier/homebridge-samsung-tv/issues"
   },
   "funding": [
     {
@@ -35,6 +35,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.2",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "eslint": "^9.39.2",
@@ -48,6 +49,8 @@
     "typescript": "^4.9.5"
   },
   "dependencies": {
-    "node-html-parser": "^7.0.1"
+    "node-html-parser": "^7.0.2",
+    "wol": "^1.0.7",
+    "ws": "^8.19.0"
   }
 }

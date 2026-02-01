@@ -1,197 +1,150 @@
 import { CharacteristicValue, PlatformAccessory } from "homebridge";
+import WebSocket from "ws";
+import wol from "wol";
 
-import { CowayHomebridgePlatform as CowayHomebridgePlatform } from "./platform";
+import { HomebridgePlatform as HomebridgePlatform } from "./platform";
 
 export const COMMAND_COALESCE_WINDOW_MS = 500;
 
-export interface AccessoryContext {
+type SamsungWSMessage = {
+  event: "ms.channel.connect";
+  data: {
+    clients: Array<{
+      attributes: {
+        name: string; // base64 encoded, what we sent
+      };
+      connectTime: number; // time since epoch, ms, I think
+      deviceName: string; // base64 encoded, what we sent
+      id: string;
+      isHost: boolean;
+    }>;
+    id: string;
+    token?: string; // only present if new connection
+  };
+};
+
+type Key =
+  | "KEY_POWER"
+  | "KEY_REWIND"
+  | "KEY_FF"
+  | "KEY_UP"
+  | "KEY_DOWN"
+  | "KEY_LEFT"
+  | "KEY_RIGHT"
+  | "KEY_ENTER"
+  | "KEY_RETURN"
+  | "KEY_HOME"
+  | "KEY_PLAY_BACK"
+  | "KEY_INFO";
+
+// https://github.com/roberodin/ha-samsungtv-custom/blob/d28fa56707fdafde898eefc9afb2f9fdafdfe175/custom_components/samsungtv_custom/samsungctl_080b/remote_websocket.py#L459
+type OutgoingWSMessage =
+  | {
+      method: "ms.remote.control";
+      params:
+        | {
+            Cmd: "Press" | "Click" | "Release";
+            DataOfCmd: Key;
+            Option: false;
+            TypeOfRemote: "SendRemoteKey";
+          }
+        | {
+            Cmd: string; // base64 encoded
+            TypeOfRemote: "SendInputString";
+            DataOfCmd: "base64";
+          }
+        | {
+            Cmd: "Move";
+            x: number;
+            y: number;
+            Time: number; // ???
+            TypeOfRemote: "ProcessMouseDevice";
+          };
+    }
+  | {
+      method: "ms.channel.emit";
+      params:
+        | {
+            data: "";
+            event: "ed.edenApp.get";
+            to: "host";
+          }
+        | {
+            data: {
+              appId: "org.tizen.browser";
+              action_type: "NATIVE_LAUNCH";
+              metaTag: string; // url
+            };
+            event: "ed.apps.launch";
+            to: "host";
+          };
+    };
+
+export interface TVInfo {
   device: {
-    barcode: string;
-    dvcBrandCd: string;
-    dvcModel: string;
-    dvcNick: string;
-    dvcTypeCd: string;
-    prodName: string;
+    EdgeBlendingSupport: "true" | "false";
+    EdgeBlendingSupportGroup: string; // stringified int
+    FrameTVSupport: "true" | "false";
+    GamePadSupport: "true" | "false";
+    ImeSyncedSupport: "true" | "false";
+    Language: string;
+    OS: "Tizen";
+    PowerState: "on" | "standby";
+    TokenAuthSupport: "true" | "false";
+    VoiceSupport: "true" | "false";
+    WallScreenRatio: string; // stringified int?
+    WallService: "true" | "false";
+    countryCode: string;
+    description: string;
+    developerIP: string; // "0.0.0.0";
+    developerMode: string; // "0";
+    duid: `uuid:${string}`;
+    firmwareVersion: string; // "Unknown";
+    id: `uuid:${string}`;
+    ip: string;
+    model: string;
+    modelName: string;
+    name: string;
+    networkType: "wired" | "wireless";
+    resolution: `${number}x${number}`;
+    smartHubAgreement: "true" | "false";
+    type: string;
+    udn: `uuid:${string}`;
+    wifiMac: string;
   };
+  id: `uuid:${string}`;
+  isSupport: '{"DMP_DRM_PLAYREADY":"false","DMP_DRM_WIDEVINE":"false","DMP_available":"true","EDEN_available":"true","FrameTVSupport":"false","ImeSyncedSupport":"true","TokenAuthSupport":"true","remote_available":"true","remote_fourDirections":"true","remote_touchPad":"true","remote_voiceControl":"true"}\n';
+  name: string;
+  remote: string;
+  type: string;
+  uri: string; // "http://192.168.4.152:8001/api/v2/";
+  version: string; //"2.0.25";
 }
 
-enum FunctionId {
-  Power = "0001",
-  Mode = "0002",
-  AirVolume = "0003",
-  Light = "0007",
+function isConnectMessage(
+  msg: SamsungWSMessage,
+): msg is SamsungWSMessage & { event: "ms.channel.connect" } {
+  return msg.event === "ms.channel.connect";
 }
 
-type FunctionValue = {
-  [FunctionId.Power]: Power;
-  [FunctionId.Mode]: Mode;
-  [FunctionId.AirVolume]: AirVolume;
-  [FunctionId.Light]: Light;
-};
-
-type FunctionI<T extends FunctionId> = {
-  funcId: T;
-  cmdVal: FunctionValue[T];
-};
-
-type ControlData = {
-  devId: string;
-  funcList: ReadonlyArray<FunctionI<FunctionId>>;
-  dvcTypeCd: string;
-  isMultiControl: boolean;
-};
-
-enum Power {
-  On = "1",
-  Off = "0",
+export interface AccessoryContext {
+  device: TVInfo;
+  token?: string;
 }
 
-enum Light {
-  On = "2",
-  AQIOff = "1",
-  Off = "0",
-}
-
-// Combo of fan speed and mode
-enum AirVolume {
-  One = "1",
-  Two = "2",
-  Three = "3",
-  Rapid = "5",
-  // ??? = "9", // seen this once, not sure what it is
-  Off = "0", // also shows for sleep
-  Unknown = "99",
-}
-
-enum Mode {
-  Manual = "0",
-  Smart = "1",
-  Sleep = "2",
-  Off = "4",
-  Rapid = "5",
-  SmartEco = "6",
-}
-
-function isAutoMode(mode: Mode) {
-  return (
-    mode === Mode.Smart ||
-    mode === Mode.Sleep ||
-    mode === Mode.Rapid ||
-    mode === Mode.SmartEco
-  );
-}
-
-enum AirQuality {
-  Good = "1",
-  Moderate = "2",
-  Unhealthy = "3",
-  VeryUnhealthy = "4",
-}
-
-interface Response<Data> {
-  code: "S1000" | string;
-  message: "OK" | string;
-  traceId: string; // I don't need this
-  data: Data;
-}
-
-interface DeviceData {
-  analysisStartDt: string; // "202502040140"
-  analysisEndDt: string; // "202502040740"
-  closeOffSceduleId: number; // -1 indicates none?
-  closeOnSceduleId: number; // 49314
-  elapsedHeartServiceDate: string; // ""
-  filterList: ReadonlyArray<{
-    changeCycle: string; // "3" | "12"
-    cycleInfo: string; // "W" | "M"
-    filterCode: string; // "3109143" | "3109144"
-    filterName: string; // "극세사망 프리필터" | "Max2 필터"
-    filterPer: number; // percent, as x out of 100;
-    sort: number; // appears already sorted
-    lastChangeDate: string; // e.g. "20250130"
-  }>;
-  IAQ: {
-    // inside air quality?
-    co2: string; // ""
-    dustpm1: string; // ""
-    dustpm10: string; // "15"
-    dustpm25: string; // "1"
-    humidity: string; // ""
-    inairquality: string; // ""
-    temperature: string; // ""
-    vocs: string; // ""
-    rpm: string; // ""
-  };
-  OAQ: {
-    address: string; // ""
-    humidity: string; // ""
-    icon: string; // ""
-    mainairgrade: string; // ""
-    presenttime: string; // ""
-    temp: string; // ""
-  };
-  schedules: ReadonlyArray<{
-    scheId: number;
-    dayOfWeek: ReadonlyArray<
-      "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun"
-    >;
-    cmdValue: number; // -1 indicates none?
-    startTime: string; // "0800" | "2100"
-    endTime: string; // "0800" | "2100"
-    lightOnOff: number; // 1 | 0 ?
-    specialMode: number; // 0 ?
-    movingMode: number; // 0 ?
-    enabled: string; // "Y" | "N" ?
-    devDtTimezn: string; // "-7.0"
-    devDstTimezn: string;
-  }>;
-  pm10Graph: ReadonlyArray<{
-    msrDt: string; // "202502040140"
-    place: string; // "in"
-    graphHighValue: string; // "5"
-    graphValue: string; // "2"
-  }>;
-  prodStatus: {
-    AICare: "";
-    humidification: "";
-    airVolume: AirVolume;
-    dustPollution: "1";
-    dustSensitivity: "2";
-    light: Light;
-    lightDetail: "";
-    pollenMode: "";
-    power: Power;
-    prodMode: Mode;
-    reservation: "";
-    specialModeIndex: "";
-    vocsGrade: "";
-    silent: "";
-    onTimer: "";
-    purityFanAction: "";
-    purityFanActionTime: "";
-  };
-  nextHeartService: "";
-  humidity: 0;
-  temperature: 0;
-  netStatus: false;
-  filterdeliveryList: [];
-}
-
-export class CowayPlatformAccessory {
-  data: null | DeviceData = null;
-  private pendingCommands: Array<FunctionI<FunctionId>> = [];
-  private coalesceTimer?: NodeJS.Timeout;
-  private pendingSendPromise: Promise<void> | null = null;
-  private pendingSendResolve: (() => void) | null = null;
-  private pendingSendReject: ((reason?: unknown) => void) | null = null;
+export class MyPlatformAccessory {
+  private ws: WebSocket;
 
   constructor(
-    private readonly platform: CowayHomebridgePlatform,
+    private readonly platform: HomebridgePlatform,
     private readonly accessory: PlatformAccessory<AccessoryContext>,
   ) {
     this.accessory
       .getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, "Coway")
+      .setCharacteristic(
+        this.platform.Characteristic.Manufacturer,
+        this.accessory.context.device.type,
+      )
       .setCharacteristic(
         this.platform.Characteristic.FirmwareRevision,
 
@@ -200,11 +153,33 @@ export class CowayPlatformAccessory {
       )
       .setCharacteristic(
         this.platform.Characteristic.Name,
-        this.accessory.context.device.dvcNick,
+        this.accessory.context.device.device.name,
       )
       .setCharacteristic(
         this.platform.Characteristic.Model,
-        this.accessory.context.device.dvcModel,
+        this.accessory.context.device.device.modelName,
+      );
+    this.accessory.category = this.platform.api.hap.Categories.TELEVISION;
+    this.platform.api.updatePlatformAccessories([this.accessory]);
+
+    const tvService =
+      this.accessory.getService(this.platform.Service.Television) ||
+      this.accessory.addService(this.platform.Service.Television);
+    tvService
+      .setCharacteristic(
+        this.platform.Characteristic.ConfiguredName,
+        this.accessory.context.device.name,
+      )
+      .setCharacteristic(
+        this.platform.Characteristic.SleepDiscoveryMode,
+        this.platform.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE,
+      )
+      .setCharacteristic(this.platform.Characteristic.ActiveIdentifier, 1)
+      .setCharacteristic(
+        this.platform.Characteristic.Active,
+        this.accessory.context.device.device.PowerState === "on"
+          ? this.platform.Characteristic.Active.ACTIVE
+          : this.platform.Characteristic.Active.INACTIVE,
       );
 
     const logSet =
@@ -214,517 +189,186 @@ export class CowayPlatformAccessory {
         return fn(value);
       };
 
-    const airPurifierService =
-      this.accessory.getService(this.platform.Service.AirPurifier) ||
-      this.accessory.addService(this.platform.Service.AirPurifier);
-    airPurifierService
-      .getCharacteristic(this.platform.Characteristic.Name)
-      .setValue(this.accessory.context.device.dvcNick);
-    airPurifierService
+    (tvService.testCharacteristic(this.platform.Characteristic.RemoteKey)
+      ? tvService.getCharacteristic(this.platform.Characteristic.RemoteKey)
+      : tvService.addCharacteristic(this.platform.Characteristic.RemoteKey)
+    ).onSet(
+      logSet("remote key", async (value: CharacteristicValue) => {
+        let key: Key | null = null;
+        // https://github.com/vrachieru/samsung-tv-api/blob/master/samsungtv/remote.py
+        switch (value) {
+          case this.platform.Characteristic.RemoteKey.REWIND:
+            key = "KEY_REWIND";
+            break;
+          case this.platform.Characteristic.RemoteKey.FAST_FORWARD:
+            key = "KEY_FF";
+            break;
+          case this.platform.Characteristic.RemoteKey.NEXT_TRACK:
+            break;
+          case this.platform.Characteristic.RemoteKey.PREVIOUS_TRACK:
+            break;
+          case this.platform.Characteristic.RemoteKey.ARROW_UP:
+            key = "KEY_UP";
+            break;
+          case this.platform.Characteristic.RemoteKey.ARROW_DOWN:
+            key = "KEY_DOWN";
+            break;
+          case this.platform.Characteristic.RemoteKey.ARROW_LEFT:
+            key = "KEY_LEFT";
+            break;
+          case this.platform.Characteristic.RemoteKey.ARROW_RIGHT:
+            key = "KEY_RIGHT";
+            break;
+          case this.platform.Characteristic.RemoteKey.SELECT:
+            key = "KEY_ENTER";
+            break;
+          case this.platform.Characteristic.RemoteKey.BACK:
+            key = "KEY_RETURN";
+            break;
+          case this.platform.Characteristic.RemoteKey.EXIT:
+            key = "KEY_HOME";
+            break;
+          case this.platform.Characteristic.RemoteKey.PLAY_PAUSE:
+            key = "KEY_PLAY_BACK";
+            break;
+          case this.platform.Characteristic.RemoteKey.INFORMATION:
+            key = "KEY_INFO";
+            break;
+        }
+
+        if (!key) {
+          return;
+        }
+
+        this.send({
+          method: "ms.remote.control",
+          params: {
+            Cmd: "Click",
+            DataOfCmd: key,
+            Option: false,
+            TypeOfRemote: "SendRemoteKey",
+          },
+        });
+      }),
+    );
+    tvService
       .getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(this.getActive)
+      .onGet(async () => {
+        const {
+          device: { PowerState },
+        } = await this.refresh();
+        switch (PowerState) {
+          case "on":
+            return this.platform.Characteristic.Active.ACTIVE;
+          case "standby":
+            return this.platform.Characteristic.Active.INACTIVE;
+          default:
+            this.platform.log.warn(`Unknown PowerState: ${PowerState}`);
+            return this.platform.Characteristic.Active.INACTIVE;
+        }
+      })
       .onSet(
-        logSet("setting power", async (value) =>
-          this.controlDevice([
-            {
-              funcId: FunctionId.Power,
-              cmdVal:
-                value === this.platform.Characteristic.Active.ACTIVE
-                  ? Power.On
-                  : Power.Off,
-            },
-          ]),
-        ),
-      );
-    airPurifierService
-      .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
-      .onGet(this.getCurrentAirPurifierState);
-    airPurifierService
-      .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
-      .onGet(this.getTargetAirPurifierState)
-      .onSet(
-        logSet("setting target state", async (value) =>
-          this.controlDevice([
-            {
-              funcId: FunctionId.Mode,
-              cmdVal:
-                value ===
-                this.platform.Characteristic.TargetAirPurifierState.AUTO
-                  ? Mode.Smart
-                  : Mode.Manual,
-            },
-          ]),
-        ),
-      );
-    airPurifierService
-      .getCharacteristic(this.platform.Characteristic.RotationSpeed)
-      .onGet(this.getRotationSpeed)
-      .onSet(
-        logSet("setting fan state", async (value) => {
-          if (typeof value !== "number") {
-            throw new Error(`unexpected value ${value}`);
+        logSet("Set Active", async (value: CharacteristicValue) => {
+          const targetState =
+            value === this.platform.Characteristic.Active.INACTIVE
+              ? "standby"
+              : "on";
+          const {
+            device: { PowerState },
+          } = await this.refresh();
+          if (PowerState === targetState) {
+            this.platform.log.debug(
+              `TV already in target power state: ${targetState}`,
+            );
+            return;
           }
-          let airVolume: AirVolume;
-          if (value > 80) {
-            airVolume = AirVolume.Rapid;
-          } else if (value > 50) {
-            airVolume = AirVolume.Three;
-          } else if (value > 25) {
-            airVolume = AirVolume.Two;
-          } else if (value > 0) {
-            airVolume = AirVolume.One;
+          if (targetState === "on") {
+            this.platform.log.debug("turning tv on");
+            const response = await wol.wake(
+              this.accessory.context.device.device.wifiMac,
+            );
+            this.platform.log.debug("response", response);
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            this.send({
+              method: "ms.remote.control",
+              params: {
+                Cmd: "Click",
+                DataOfCmd: "KEY_POWER",
+                Option: false,
+                TypeOfRemote: "SendRemoteKey",
+              },
+            });
           } else {
-            airVolume = AirVolume.Off;
+            this.platform.log.debug("turning tv off");
+            this.send({
+              method: "ms.remote.control",
+              params: {
+                Cmd: "Press", // must be Press, not Click
+                DataOfCmd: "KEY_POWER",
+                Option: false,
+                TypeOfRemote: "SendRemoteKey",
+              },
+            });
           }
-          await this.controlDevice([
-            {
-              funcId: FunctionId.AirVolume,
-              cmdVal: airVolume,
-            },
-          ]);
-          // setting fan manually sets to manual mode
-          airPurifierService.updateCharacteristic(
-            this.platform.Characteristic.TargetAirPurifierState,
-            this.platform.Characteristic.TargetAirPurifierState.MANUAL,
-          );
         }),
       );
 
-    const indoorAirQualityService =
-      this.accessory.getServiceById(
-        this.platform.Service.AirQualitySensor,
-        "indoor",
-      ) ||
-      this.accessory.addService(
-        this.platform.Service.AirQualitySensor,
-        "Indoor Air Quality",
-        "indoor",
+    const searchParams = new URLSearchParams();
+    searchParams.append(
+      "name",
+      Buffer.from(
+        `Homebridge - ${this.accessory.context.device.name}`,
+      ).toString("base64"),
+    );
+    if (this.accessory.context.token) {
+      searchParams.append("token", this.accessory.context.token);
+    }
+
+    const url = `wss://${
+      this.accessory.context.device.device.ip
+    }:8002/api/v2/channels/samsung.remote.control?${searchParams.toString()}`;
+    // unfortunately we can't use the built-in node:ws support because we need
+    // to accept a self-signed certificate
+    this.ws = new WebSocket(url, {
+      rejectUnauthorized: false,
+    });
+    this.ws.addEventListener("open", () => {
+      this.platform.log.debug(
+        `Connected to Samsung TV ${this.accessory.context.device.name}`,
       );
-    indoorAirQualityService
-      .getCharacteristic(this.platform.Characteristic.Name)
-      .setValue("Indoor Air Quality");
-    indoorAirQualityService
-      .getCharacteristic(this.platform.Characteristic.AirQuality)
-      .onGet(this.getAirQuality);
-    indoorAirQualityService
-      .getCharacteristic(this.platform.Characteristic.PM2_5Density)
-      .onGet(this.getPm25Density);
-    indoorAirQualityService
-      .getCharacteristic(this.platform.Characteristic.PM10Density)
-      .onGet(this.getPm10Density);
-
-    const filters = {
-      [0]: {
-        subtype: "PreFilter",
-        name: "Pre Filter",
-      },
-      [1]: {
-        subtype: "MainFilter",
-        name: "Main Filter",
-      },
-    };
-
-    for (const [filterIndex, { subtype, name }] of Object.entries(filters)) {
-      const filterService =
-        this.accessory.getServiceById(
-          this.platform.Service.FilterMaintenance,
-          subtype,
-        ) ||
-        this.accessory.addService(
-          this.platform.Service.FilterMaintenance,
-          name,
-          subtype,
-        );
-      filterService
-        .getCharacteristic(this.platform.Characteristic.Name)
-        .setValue(name);
-      // not localized, so we don't use this
-      // .onGet(
-      //   () => this.guardedOnlineData().filterList[filterIndex].filterName
-      // );
-      filterService
-        .getCharacteristic(this.platform.Characteristic.FilterChangeIndication)
-        .onGet(() =>
-          this.guardedOnlineData().filterList[filterIndex].filterPer < 20
-            ? this.platform.Characteristic.FilterChangeIndication.CHANGE_FILTER
-            : this.platform.Characteristic.FilterChangeIndication.FILTER_OK,
-        );
-      filterService
-        .getCharacteristic(this.platform.Characteristic.FilterLifeLevel)
-        .onGet(
-          () => this.guardedOnlineData().filterList[filterIndex].filterPer,
-        );
-    }
-
-    this.poll();
-  }
-
-  private getPm10Density = () => {
-    if (this.guardedOnlineData().IAQ.dustpm10 === "") {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+    });
+    this.ws.addEventListener("error", (err) => {
+      this.platform.log.error(
+        `WebSocket error for Samsung TV ${this.accessory.context.device.name}:`,
+        err,
       );
-    }
-    return parseInt(this.guardedOnlineData().IAQ.dustpm10, 10);
-  };
-  private getPm25Density = () => {
-    if (this.guardedOnlineData().IAQ.dustpm25 === "") {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
-      );
-    }
-    return parseInt(this.guardedOnlineData().IAQ.dustpm25, 10);
-  };
-  private getRotationSpeed = () => {
-    this.platform.log.debug(
-      `getCharacteristic.RotationSpeed`,
-      this.guardedOnlineData().prodStatus.airVolume,
-    );
-    const airVolume = this.guardedOnlineData().prodStatus.airVolume;
-    switch (airVolume) {
-      case AirVolume.One:
-        return 25;
-      case AirVolume.Two:
-        return 50;
-      case AirVolume.Three:
-        return 75;
-      case AirVolume.Rapid:
-        return 100;
-      case AirVolume.Off:
-      case AirVolume.Unknown: // ? I think
-        return 0;
-      default:
-        throw new Error(`unknown fan ${airVolume}`);
-    }
-  };
-  private getTargetAirPurifierState = () => {
-    this.platform.log.debug(
-      `getCharacteristic.TargetAirPurifierState`,
-      this.guardedOnlineData().prodStatus.prodMode,
-    );
-    switch (this.guardedOnlineData().prodStatus.prodMode) {
-      case Mode.Smart:
-      case Mode.SmartEco:
-      case Mode.Rapid: // max speed until AQI is good for more than 5 minutes, then smart
-      case Mode.Sleep:
-        return this.platform.Characteristic.TargetAirPurifierState.AUTO;
-      case Mode.Manual:
-        return this.platform.Characteristic.TargetAirPurifierState.MANUAL;
-      case Mode.Off:
-        return this.platform.Characteristic.TargetAirPurifierState.AUTO;
-    }
-  };
-  private getCurrentAirPurifierState = () => {
-    this.platform.log.debug(
-      `getCharacteristic.CurrentAirPurifierState`,
-      this.guardedOnlineData().prodStatus,
-    );
-    const prodStatus = this.guardedOnlineData().prodStatus;
-    if (prodStatus.prodMode === Mode.Off) {
-      return this.platform.Characteristic.CurrentAirPurifierState.INACTIVE;
-    }
-    if (prodStatus.airVolume === AirVolume.Off) {
-      return this.platform.Characteristic.CurrentAirPurifierState.IDLE;
-    }
-    return this.platform.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-  };
-  private getActive = () => {
-    this.platform.log.debug(
-      `getCharacteristic.Active`,
-      this.guardedOnlineData().prodStatus.power,
-    );
-    return this.guardedOnlineData().prodStatus.power === Power.On
-      ? this.platform.Characteristic.Active.ACTIVE
-      : this.platform.Characteristic.Active.INACTIVE;
-  };
-  private getAirQuality = () => {
-    this.platform.log.debug(
-      `getCharacteristic.AirQuality`,
-      this.guardedOnlineData().IAQ,
-    );
-    const airQuality = this.guardedOnlineData().IAQ.inairquality;
-    switch (airQuality) {
-      case AirQuality.Good:
-        return this.platform.Characteristic.AirQuality.EXCELLENT;
-      case AirQuality.Moderate:
-        return this.platform.Characteristic.AirQuality.GOOD;
-      case AirQuality.Unhealthy:
-        return this.platform.Characteristic.AirQuality.FAIR;
-      case AirQuality.VeryUnhealthy:
-        return this.platform.Characteristic.AirQuality.POOR;
-      case "":
-        this.platform.log.debug(`no air quality, falling back to pm`);
-        break;
-      default:
-        this.platform.log.warn(
-          `unknown air quality "${airQuality}", falling back to pm`,
+    });
+    this.ws.addEventListener("message", (message) => {
+      const data = JSON.parse(message.data.toString()) as SamsungWSMessage;
+      if (isConnectMessage(data)) {
+        this.platform.log.info(
+          `WebSocket connected to Samsung TV ${this.accessory.context.device.name}`,
         );
-    }
-
-    // fall back to pm2.5, pm10, or pm1
-    const { dustpm25, dustpm10, dustpm1 } = this.guardedOnlineData().IAQ;
-    let pmValue = -1;
-    if (dustpm25 !== "") {
-      pmValue = parseInt(dustpm25, 10);
-    } else if (dustpm10 !== "") {
-      pmValue = parseInt(dustpm10, 10);
-    } else if (dustpm1 !== "") {
-      pmValue = parseInt(dustpm1, 10);
-    }
-
-    if (pmValue >= 151) {
-      return this.platform.Characteristic.AirQuality.POOR;
-    }
-    if (pmValue >= 56) {
-      return this.platform.Characteristic.AirQuality.INFERIOR;
-    }
-    if (pmValue >= 36) {
-      return this.platform.Characteristic.AirQuality.FAIR;
-    }
-    if (pmValue >= 12) {
-      return this.platform.Characteristic.AirQuality.GOOD;
-    }
-    if (pmValue >= 0) {
-      return this.platform.Characteristic.AirQuality.EXCELLENT;
-    }
-    throw new Error(`unknown dustpm: ${dustpm25} / ${dustpm10} / ${dustpm1}`);
-  };
-
-  private pushHomeKitUpdates = () => {
-    const airPurifierService = this.accessory.getService(
-      this.platform.Service.AirPurifier,
-    );
-    if (airPurifierService) {
-      airPurifierService
-        .getCharacteristic(this.platform.Characteristic.CurrentAirPurifierState)
-        .updateValue(this.getCurrentAirPurifierState());
-      airPurifierService
-        .getCharacteristic(this.platform.Characteristic.TargetAirPurifierState)
-        .updateValue(this.getTargetAirPurifierState());
-      airPurifierService
-        .getCharacteristic(this.platform.Characteristic.Active)
-        .updateValue(this.getActive());
-      airPurifierService
-        .getCharacteristic(this.platform.Characteristic.RotationSpeed)
-        .updateValue(this.getRotationSpeed());
-    }
-
-    const indoorAirQualityService = this.accessory.getServiceById(
-      this.platform.Service.AirQualitySensor,
-      "indoor",
-    );
-    if (indoorAirQualityService) {
-      indoorAirQualityService
-        .getCharacteristic(this.platform.Characteristic.AirQuality)
-        .updateValue(this.getAirQuality());
-      if (this.guardedOnlineData().IAQ.dustpm25 !== "") {
-        indoorAirQualityService
-          .getCharacteristic(this.platform.Characteristic.PM2_5Density)
-          .updateValue(this.getPm25Density());
+        if (data.data.token) {
+          this.platform.log.info(
+            `Received new token from Samsung TV ${this.accessory.context.device.name}: ${data.data.token}`,
+          );
+          // Save token
+          this.accessory.context.token = data.data.token;
+          this.platform.api.updatePlatformAccessories([this.accessory]);
+        }
       }
-      if (this.guardedOnlineData().IAQ.dustpm10 === "") {
-        indoorAirQualityService
-          .getCharacteristic(this.platform.Characteristic.PM10Density)
-          .updateValue(this.getPm10Density());
-      }
-    }
-  };
-  // ???
-  private async comDevice() {
-    const url = new URL(
-      `https://iocareapi.iot.coway.com/api/v1/com/devices/${this.accessory.context.device.barcode}/control`,
-    );
-    url.searchParams.append("devId", this.accessory.context.device.barcode);
-    url.searchParams.append("mqttDevice", "true"); // I wish
-    url.searchParams.append(
-      "dvcBrandCd",
-      this.accessory.context.device.dvcBrandCd,
-    );
-    url.searchParams.append(
-      "dvcTypeCd",
-      this.accessory.context.device.dvcTypeCd,
-    );
-    url.searchParams.append("prodName", this.accessory.context.device.prodName);
-
-    return (await (await this.platform.fetch(url)).json()) as Response<{
-      controlStatus: {
-        [FunctionId.Power]: Power; // "1"
-        [FunctionId.Mode]: Mode; // "2"
-        [FunctionId.AirVolume]: AirVolume; // "3"
-        [FunctionId.Light]: Light;
-        "0008": string; // "0"
-        "000A": string; // "2"
-        "000E": string; // "1"
-        "0012": string; // "0"
-        "0018": string; // "0"
-        "0019": string; // "0"
-        "0021": string; // "0"
-        "0024": string; // "0"
-        "0025": string; // "0"
-        "002F": string; // "1"
-        offTimer: string; // "0"
-        originDt: string; // "1738704280790"
-        serial: string; // "41102F9R2481600525"
-      };
-      lastBubbleSterTime: string; // ""
-      lastDrainageTime: string; // ""
-      lastSterTime: string; // ""
-      errorCode: string; // ""
-      errorYn: boolean; // false
-      netStatus: boolean; // true
-      waterLevel: number; // 0
-    }>;
+    });
   }
 
-  private async controlDevice(commands: Array<FunctionI<FunctionId>>) {
-    this.pendingCommands = this.coalesceCommands(
-      this.pendingCommands,
-      commands,
+  async refresh() {
+    const response = await fetch(
+      `http://${this.accessory.context.device.device.ip}:8001/api/v2/`,
     );
-
-    clearTimeout(this.coalesceTimer);
-
-    if (!this.pendingSendPromise) {
-      this.pendingSendPromise = new Promise((resolve, reject) => {
-        this.pendingSendResolve = resolve;
-        this.pendingSendReject = reject;
-      });
-    }
-
-    this.coalesceTimer = setTimeout(() => {
-      const coalescedCommands = this.pendingCommands;
-      this.pendingCommands = [];
-
-      this.sendCommands(coalescedCommands)
-        .then(() => this.pendingSendResolve?.())
-        .catch((err) => {
-          this.platform.log.error("control device error", err);
-          this.pendingSendReject?.(err);
-        })
-        .finally(() => {
-          this.pendingSendPromise = null;
-          this.pendingSendResolve = null;
-          this.pendingSendReject = null;
-        });
-    }, COMMAND_COALESCE_WINDOW_MS);
-
-    return this.pendingSendPromise;
+    return (await response.json()) as TVInfo;
   }
 
-  private async sendCommands(commands: Array<FunctionI<FunctionId>>) {
-    if (!commands[FunctionId.Light]) {
-      const comDV = await this.comDevice();
-      commands.push({
-        funcId: FunctionId.Light,
-        cmdVal: comDV.data.controlStatus[FunctionId.Light],
-      });
-    }
-    const body = JSON.stringify({
-      devId: this.accessory.context.device.barcode,
-      funcList: commands,
-      dvcTypeCd: this.accessory.context.device.dvcTypeCd,
-      isMultiControl: false,
-    } satisfies ControlData);
-    this.platform.log.debug("controlling device", body);
-    await this.platform.fetch(
-      `https://iocareapi.iot.coway.com/api/v1/com/control-device`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body,
-      },
-    );
-    await this.updateStatus();
+  private send(event: OutgoingWSMessage) {
+    this.ws.send(JSON.stringify(event));
   }
-
-  private coalesceCommands(
-    current: Array<FunctionI<FunctionId>>,
-    incoming: Array<FunctionI<FunctionId>>,
-  ): Array<FunctionI<FunctionId>> {
-    if (incoming.some(isOffCommand)) {
-      this.platform.log.debug("'Off' command received. Ignoring other input.");
-      return incoming.filter(isOffCommand);
-    }
-
-    const mergedCommands = new Map<FunctionId, FunctionValue[FunctionId]>();
-    for (const command of current) {
-      mergedCommands.set(command.funcId, command.cmdVal);
-    }
-    for (const command of incoming) {
-      mergedCommands.set(command.funcId, command.cmdVal);
-    }
-
-    const modeCommand = mergedCommands.get(FunctionId.Mode) as Mode | undefined;
-    if (modeCommand !== undefined) {
-      if (isAutoMode(modeCommand)) {
-        // remove any fan speed settings, see #18
-        mergedCommands.delete(FunctionId.AirVolume);
-        this.platform.log.debug(
-          "Auto mode set, removing any fan speed commands.",
-        );
-      }
-    }
-
-    return Array.from(mergedCommands.entries()).map(([funcId, cmdVal]) => ({
-      funcId,
-      cmdVal,
-    }));
-  }
-
-  private poll() {
-    this.updateStatus()
-      .catch((err) => {
-        this.platform.log.error(
-          "update status error",
-          err,
-          (err as Error).stack,
-        );
-      })
-      .then(() => setTimeout(this.poll.bind(this), 10 * 1000));
-  }
-
-  private async updateStatus() {
-    const url = new URL(
-      `https://iocareapi.iot.coway.com/api/v1/air/devices/${this.accessory.context.device.barcode}/home`,
-    );
-    // url.searchParams.append('admdongCd', 'US');
-    url.searchParams.append("barcode", this.accessory.context.device.barcode);
-    url.searchParams.append(
-      "dvcBrandCd",
-      this.accessory.context.device.dvcBrandCd,
-    );
-    // url.searchParams.append('prodName', this.accessory.context.device.prodName);
-    // url.searchParams.append('zipCode', '');
-    // url.searchParams.append('resetDttm', '');
-    // url.searchParams.append('deviceType', this.accessory.context.device.dvcTypeCd);
-    url.searchParams.append("mqttDevice", "true"); // TODO: this could mean local control without network connection is possible
-    url.searchParams.append("orderNo", "undefined");
-    url.searchParams.append("membershipYn", "N");
-    // url.searchParams.append('selfYn', 'N');
-
-    const { data } = (await (
-      await this.platform.fetch(url)
-    ).json()) as Response<DeviceData>;
-    this.platform.log.debug("updated status");
-    this.data = data;
-    this.pushHomeKitUpdates();
-  }
-
-  private guardedOnlineData(): DeviceData {
-    if (this.data === null) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-    return this.data;
-  }
-}
-
-function isOffCommand(command: FunctionI<FunctionId>) {
-  return (
-    (command.funcId === FunctionId.Power && command.cmdVal === Power.Off) ||
-    (command.funcId === FunctionId.Mode && command.cmdVal === Mode.Off)
-  );
 }
