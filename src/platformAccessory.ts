@@ -633,15 +633,11 @@ export class CowayPlatformAccessory {
     current: Array<FunctionI<FunctionId>>,
     incoming: Array<FunctionI<FunctionId>>,
   ): Array<FunctionI<FunctionId>> {
-    if (containsSmartMode(incoming)) {
+    if (incoming.some(isSmartModeCommand)) {
       this.platform.log.debug(
         "'Smart Mode' command received. Ignoring other input.",
       );
-      return incoming.filter(
-        (command) =>
-          command.funcId === FunctionId.Mode &&
-          isSmartMode(command.cmdVal as Mode),
-      );
+      return incoming.filter(isSmartModeCommand);
     }
 
     if (incoming.some(isOffCommand)) {
@@ -649,22 +645,16 @@ export class CowayPlatformAccessory {
       return incoming.filter(isOffCommand);
     }
 
-    if (containsSmartMode(current)) {
+    if (current.some(isSmartModeCommand)) {
       return current;
     }
 
     const mergedCommands = new Map<FunctionId, FunctionValue[FunctionId]>();
     for (const command of current) {
-      mergedCommands.set(
-        command.funcId,
-        command.cmdVal as FunctionValue[FunctionId],
-      );
+      mergedCommands.set(command.funcId, command.cmdVal);
     }
     for (const command of incoming) {
-      mergedCommands.set(
-        command.funcId,
-        command.cmdVal as FunctionValue[FunctionId],
-      );
+      mergedCommands.set(command.funcId, command.cmdVal);
     }
 
     return Array.from(mergedCommands.entries()).map(([funcId, cmdVal]) => ({
@@ -733,10 +723,11 @@ function isSmartMode(mode: Mode) {
   return mode === Mode.Smart || mode === Mode.SmartEco;
 }
 
-function containsSmartMode(commands: Array<FunctionI<FunctionId>>) {
-  return commands.some(
-    (command) =>
-      isCommandOfMode(command, FunctionId.Mode) && isSmartMode(command.cmdVal),
+function isSmartModeCommand(
+  command: FunctionI<FunctionId>,
+): command is FunctionI<FunctionId> {
+  return (
+    isCommandOfMode(command, FunctionId.Mode) && isSmartMode(command.cmdVal)
   );
 }
 
