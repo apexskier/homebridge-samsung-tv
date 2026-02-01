@@ -644,11 +644,9 @@ export class CowayPlatformAccessory {
       );
     }
 
-    if (containsOffCommand(incoming)) {
+    if (incoming.some(isOffCommand)) {
       this.platform.log.debug("'Off' command received. Ignoring other input.");
-      return incoming.filter((command) =>
-        isOffCommand(command.funcId, command.cmdVal as Mode | Power),
-      );
+      return incoming.filter(isOffCommand);
     }
 
     if (containsSmartMode(current)) {
@@ -724,6 +722,13 @@ export class CowayPlatformAccessory {
   }
 }
 
+function isCommandOfMode<T extends FunctionId>(
+  command: FunctionI<FunctionId>,
+  mode: T,
+): command is FunctionI<T> {
+  return command.funcId === mode;
+}
+
 function isSmartMode(mode: Mode) {
   return mode === Mode.Smart || mode === Mode.SmartEco;
 }
@@ -731,19 +736,13 @@ function isSmartMode(mode: Mode) {
 function containsSmartMode(commands: Array<FunctionI<FunctionId>>) {
   return commands.some(
     (command) =>
-      command.funcId === FunctionId.Mode && isSmartMode(command.cmdVal as Mode),
+      isCommandOfMode(command, FunctionId.Mode) && isSmartMode(command.cmdVal),
   );
 }
 
-function isOffCommand(funcId: FunctionId, value: Mode | Power) {
+function isOffCommand(command: FunctionI<FunctionId>) {
   return (
-    (funcId === FunctionId.Power && value === Power.Off) ||
-    (funcId === FunctionId.Mode && value === Mode.Off)
-  );
-}
-
-function containsOffCommand(commands: Array<FunctionI<FunctionId>>) {
-  return commands.some((command) =>
-    isOffCommand(command.funcId, command.cmdVal as Mode | Power),
+    (command.funcId === FunctionId.Power && command.cmdVal === Power.Off) ||
+    (command.funcId === FunctionId.Mode && command.cmdVal === Mode.Off)
   );
 }
