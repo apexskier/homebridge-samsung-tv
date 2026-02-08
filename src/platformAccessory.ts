@@ -135,6 +135,9 @@ export interface AccessoryContext {
 export class MyPlatformAccessory {
   private ws: WebSocket;
 
+  // you can't turn the tv on immediately after turning off, wait a bit
+  private shutdownPromise: Promise<void> | null = null;
+
   constructor(
     private readonly platform: HomebridgePlatform,
     private readonly accessory: PlatformAccessory<AccessoryContext>,
@@ -253,35 +256,15 @@ export class MyPlatformAccessory {
     );
     tvService
       .getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(async () => {
-        const {
-          device: { PowerState },
-        } = await this.refresh();
-        switch (PowerState) {
-          case "on":
-            return this.platform.Characteristic.Active.ACTIVE;
-          case "standby":
-            return this.platform.Characteristic.Active.INACTIVE;
-          default:
-            this.platform.log.warn(`Unknown PowerState: ${PowerState}`);
-            return this.platform.Characteristic.Active.INACTIVE;
-        }
-      })
+      .onGet(this.getActive.bind(this))
       .onSet(
         logSet("Set Active", async (value: CharacteristicValue) => {
           const targetState =
             value === this.platform.Characteristic.Active.INACTIVE
               ? "standby"
               : "on";
-          let currentState: "unknown" | "on" | "standby" = "unknown";
-          try {
-            const {
-              device: { PowerState },
-            } = await this.refresh();
-            currentState = PowerState;
-          } catch (error) {
-            this.platform.log.debug("Error refreshing TV state:", error);
-          }
+          await this.shutdownPromise;
+          let currentState = await this.powerState();
           if (currentState === targetState) {
             this.platform.log.debug(
               `TV already in target power state: ${targetState}`,
@@ -290,11 +273,11 @@ export class MyPlatformAccessory {
           }
           if (targetState === "on") {
             this.platform.log.debug("turning tv on");
-            const response = await wol.wake(
-              this.accessory.context.device.device.wifiMac,
-            );
-            this.platform.log.debug("response", response);
-            await new Promise((resolve) => setTimeout(resolve, 500));
+            while (currentState === null) {
+              this.platform.log.debug("waiting for TV to power on...");
+              await wol.wake(this.accessory.context.device.device.wifiMac);
+              currentState = await this.powerState();
+            }
             this.send({
               method: "ms.remote.control",
               params: {
@@ -304,6 +287,10 @@ export class MyPlatformAccessory {
                 TypeOfRemote: "SendRemoteKey",
               },
             });
+            while ((await this.powerState()) !== "on") {
+              this.platform.log.debug("waiting for TV to wake...");
+              await new Promise((resolve) => setTimeout(resolve, 400));
+            }
           } else {
             this.platform.log.debug("turning tv off");
             this.send({
@@ -315,7 +302,17 @@ export class MyPlatformAccessory {
                 TypeOfRemote: "SendRemoteKey",
               },
             });
+            while ((await this.powerState()) === "on") {
+              this.platform.log.debug("waiting for TV to shut down...");
+              await new Promise((resolve) => setTimeout(resolve, 400));
+            }
+            this.shutdownPromise = new Promise((resolve) => {
+              setTimeout(resolve, 2000);
+            });
           }
+          tvService
+            .getCharacteristic(this.platform.Characteristic.Active)
+            .updateValue(value);
         }),
       );
 
@@ -367,9 +364,40 @@ export class MyPlatformAccessory {
     });
   }
 
-  async refresh() {
+  private async getActive() {
+    const powerState = await this.powerState();
+    switch (powerState) {
+      case "on":
+        return this.platform.Characteristic.Active.ACTIVE;
+      case "standby":
+        return this.platform.Characteristic.Active.INACTIVE;
+      case null:
+        return this.platform.Characteristic.Active.INACTIVE;
+      default:
+        this.platform.log.warn(`Unknown PowerState: ${powerState}`);
+        return this.platform.Characteristic.Active.INACTIVE;
+    }
+  }
+
+  private async powerState() {
+    try {
+      return (await this.refresh()).device.PowerState;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async refresh() {
+    const abortController = new AbortController();
+    setTimeout(() => {
+      abortController.abort();
+    }, 1000);
     const response = await fetch(
       `http://${this.accessory.context.device.device.ip}:8001/api/v2/`,
+      { signal: abortController.signal },
     );
     return (await response.json()) as TVInfo;
   }
