@@ -1,7 +1,7 @@
 {
   "displayName": "Samsung TV",
   "name": "@apexskier/homebridge-samsung-tv",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Control a Samsung Smart TV via Homebridge",
   "license": "Apache-2.0",
   "repository": {
