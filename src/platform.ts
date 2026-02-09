@@ -1,11 +1,11 @@
 import {
   API,
-  DynamicPlatformPlugin,
   Logger,
   PlatformAccessory,
   PlatformConfig,
   Service,
   Characteristic,
+  IndependentPlatformPlugin,
 } from "homebridge";
 
 import { PLUGIN_NAME } from "./settings";
@@ -21,7 +21,7 @@ import { Config } from "./config";
  * This class is the main constructor for your plugin, this is where you should
  * parse the user config and discover/register accessories with Homebridge.
  */
-export class HomebridgePlatform implements DynamicPlatformPlugin {
+export class HomebridgePlatform implements IndependentPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
   public readonly Characteristic: typeof Characteristic =
     this.api.hap.Characteristic;
@@ -72,8 +72,6 @@ export class HomebridgePlatform implements DynamicPlatformPlugin {
     if (tvInfo.device.TokenAuthSupport !== "true") {
       this.log.error("TV does not support token authentication");
     }
-    const isSupport = JSON.parse(tvInfo.isSupport);
-    this.log.info(`TV isSupport: ${JSON.stringify(isSupport, null, 2)}`);
     const deviceId = tvInfo.id;
     const existingAccessory = this.accessories.find(
       (accessory) => accessory.UUID === this.api.hap.uuid.generate(deviceId),
@@ -82,7 +80,6 @@ export class HomebridgePlatform implements DynamicPlatformPlugin {
       this.log.info(
         "Restoring existing accessory from cache:",
         existingAccessory.displayName,
-        existingAccessory.context.token,
       );
       new MyPlatformAccessory(this, existingAccessory);
     } else {
@@ -91,211 +88,11 @@ export class HomebridgePlatform implements DynamicPlatformPlugin {
         tvInfo.name,
         this.api.hap.uuid.generate(deviceId),
       );
-      (accessory.context as AccessoryContext).device = tvInfo;
+      accessory.context.device = tvInfo;
       new MyPlatformAccessory(this, accessory);
       this.api.publishExternalAccessories(PLUGIN_NAME, [accessory]);
     }
   }
-
-  // async authorize() {
-  //   const config = this.config as unknown as Config;
-
-  //   const openIDURL = new URL(
-  //     "https://id.coway.com/auth/realms/cw-account/protocol/openid-connect/auth",
-  //   );
-  //   openIDURL.searchParams.append("auth_type", "0");
-  //   openIDURL.searchParams.append("response_type", "code");
-  //   openIDURL.searchParams.append("client_id", "cwid-prd-iocare-20240327");
-  //   openIDURL.searchParams.append("ui_locales", "en-US");
-  //   openIDURL.searchParams.append("dvc_cntry_id", "US");
-  //   // openIDURL.searchParams.append(
-  //   //   "redirect_uri",
-  //   //   "https://iocare-redirect.iot.coway.com/redirect_bridge.html"
-  //   // );
-
-  //   const openIDInitResponse = await fetch(
-  //     openIDURL.toString() +
-  //       `&redirect_uri=https://iocare-redirect.iot.coway.com/redirect_bridge.html`,
-  //     {
-  //       headers: {
-  //         "User-Agent":
-  //           "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1 app",
-  //         Accept:
-  //           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  //         "Accept-Language": "en-US,en;q=0.9",
-  //       },
-  //     },
-  //   );
-  //   const body = await openIDInitResponse.text();
-  //   const htmlRoot = htmlParse(body);
-  //   const loginForm = htmlRoot.querySelector("#kc-form-login");
-  //   if (!loginForm) {
-  //     this.log.error("missing login form", body);
-  //     throw new this.api.hap.HapStatusError(
-  //       this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  //     );
-  //   }
-  //   const loginUrl = loginForm.getAttribute("action");
-  //   if (!loginUrl) {
-  //     this.log.error("missing login url", body);
-  //     throw new this.api.hap.HapStatusError(
-  //       this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  //     );
-  //   }
-  //   const loginMethod = loginForm.getAttribute("method");
-  //   const openIDCookies = (
-  //     openIDInitResponse.headers as unknown as { getSetCookie(): string[] }
-  //   )
-  //     .getSetCookie()
-  //     .map((cookieStr) => cookieStr.split(";")[0])
-  //     .join("; ");
-
-  //   // need to use search params for proper encoding for some reason
-  //   const loginRequestBody = new URLSearchParams();
-  //   loginRequestBody.append("clientName", "IOCARE");
-  //   loginRequestBody.append("termAgreementStatus", "");
-  //   loginRequestBody.append("idp", "");
-  //   loginRequestBody.append("username", config.username);
-  //   loginRequestBody.append("password", config.password);
-  //   loginRequestBody.append("rememberMe", "on");
-
-  //   this.accessToken = "";
-  //   let loginResponse = await fetch(loginUrl, {
-  //     method: loginMethod,
-  //     body: loginRequestBody.toString(),
-  //     redirect: "manual",
-  //     headers: {
-  //       Cookie: openIDCookies ?? "",
-  //       "Content-Type": "application/x-www-form-urlencoded",
-
-  //       "User-Agent":
-  //         "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1 app",
-  //       Accept:
-  //         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  //       "Accept-Language": "en-US,en;q=0.9",
-  //     },
-  //   });
-
-  //   if (loginResponse.status === 200) {
-  //     // some UI was rendered, could be password reset reminder
-  //     const body = await loginResponse.text();
-  //     const htmlRoot = htmlParse(body);
-  //     const passwordChangeForm = htmlRoot.querySelector(
-  //       "#kc-password-change-form",
-  //     );
-  //     if (passwordChangeForm) {
-  //       this.log.info("password change form found, skipping it");
-
-  //       // password reset reminder, submit "not now"
-  //       const changePasswordURL = passwordChangeForm.getAttribute("action");
-  //       if (!changePasswordURL) {
-  //         this.log.error("missing change password url", body);
-  //         throw new this.api.hap.HapStatusError(
-  //           this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  //         );
-  //       }
-
-  //       // need to use search params for proper encoding for some reason
-  //       const changePasswordBody = new URLSearchParams();
-  //       changePasswordBody.append("cmd", "change_after_30days"); // or, "change_next_time"
-  //       // changePasswordBody.append("checkPasswordNeededYn", "Y");
-  //       // changePasswordBody.append("current_password", "");
-  //       // changePasswordBody.append("new_password", "");
-  //       // changePasswordBody.append("new_password_confirm", "");
-
-  //       this.accessToken = "";
-  //       loginResponse = await fetch(changePasswordURL, {
-  //         method: "POST",
-  //         body: changePasswordBody.toString(),
-  //         redirect: "manual",
-  //         headers: {
-  //           Cookie: openIDCookies ?? "",
-  //           "Content-Type": "application/x-www-form-urlencoded",
-
-  //           "User-Agent":
-  //             "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1 app",
-  //           Accept:
-  //             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  //           "Accept-Language": "en-US,en;q=0.9",
-  //         },
-  //       });
-  //     }
-  //   }
-
-  //   if (loginResponse.status !== 302) {
-  //     this.log.error(
-  //       `authenticate didn't redirect, ${loginResponse.status}`,
-  //       await loginResponse.text(),
-  //     );
-  //     throw new this.api.hap.HapStatusError(
-  //       this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  //     );
-  //   }
-  //   const rawLocation = loginResponse.headers.get("location");
-  //   if (!rawLocation) {
-  //     this.log.error("missing location header", await loginResponse.text());
-  //     throw new this.api.hap.HapStatusError(
-  //       this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  //     );
-  //   }
-
-  //   const location = new URL(rawLocation);
-
-  //   const tokenResponse = await this.fetch(
-  //     "https://iocareapi.iot.coway.com/api/v1/com/token",
-  //     {
-  //       method: "POST",
-  //       body: JSON.stringify({
-  //         authCode: location.searchParams.get("code"),
-  //         redirectUrl: location.href.split("?")[0],
-  //       }),
-  //       headers: {
-  //         "content-type": "application/json",
-  //       },
-  //     },
-  //   );
-
-  //   // TODO: refresh token
-  //   const {
-  //     data: { accessToken, refreshToken },
-  //   } = (await tokenResponse.json()) as {
-  //     data: { accessToken: string; refreshToken: string };
-  //   };
-  //   this.accessToken = accessToken;
-  //   this.refreshToken = refreshToken;
-  // }
-
-  // // TODO: This isn't working, I'm getting 400 rate limiting errors of some sort
-  // async reauthorize() {
-  //   const tokenResponse = await fetch(
-  //     "https://iocareapi.iot.coway.com/api/v1/com/refresh-token",
-  //     {
-  //       method: "POST",
-  //       body: JSON.stringify({ refreshToken: this.refreshToken }),
-  //       headers: {
-  //         "content-type": "application/json",
-  //       },
-  //     },
-  //   );
-  //   if (tokenResponse.status !== 200) {
-  //     this.log.debug(
-  //       "refresh token failed",
-  //       tokenResponse,
-  //       await tokenResponse.text(),
-  //     );
-  //     throw new this.api.hap.HapStatusError(
-  //       this.api.hap.HAPStatus.INSUFFICIENT_AUTHORIZATION,
-  //     );
-  //   }
-
-  //   const {
-  //     data: { accessToken, refreshToken },
-  //   } = (await tokenResponse.json()) as {
-  //     data: { accessToken: string; refreshToken: string };
-  //   };
-  //   this.accessToken = accessToken;
-  //   this.refreshToken = refreshToken;
-  // }
 
   async fetch(input: RequestInfo | URL, init?: RequestInit) {
     let response: Response;
